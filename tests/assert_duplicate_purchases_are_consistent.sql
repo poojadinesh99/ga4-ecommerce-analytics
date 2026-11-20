@@ -1,15 +1,14 @@
--- Monitoring check (warn): duplicate purchase rows for one transaction_id should agree on
--- user and revenue. Disagreement means "keep the earliest" is a choice that changes
--- revenue, or that obfuscation reused an id across users. Returns the affected ids.
+-- Monitoring check (warn): duplicate rows of one order (same transaction_id and user)
+-- should agree on revenue. If they disagree, "keep the earliest row" changes revenue.
+-- Returns the affected orders.
 {{ config(severity = 'warn') }}
 
 select
-    transaction_id,
+    order_key,
+    any_value(transaction_id)        as transaction_id,
     count(*)                         as purchase_rows,
-    count(distinct user_pseudo_id)   as users,
     count(distinct revenue_usd)      as distinct_revenues
 from {{ ref('int_ga4__purchases') }}
-where transaction_id is not null
-group by transaction_id
-having count(*) > 1
-   and (count(distinct user_pseudo_id) > 1 or count(distinct revenue_usd) > 1)
+where order_key is not null
+group by order_key
+having count(*) > 1 and count(distinct revenue_usd) > 1

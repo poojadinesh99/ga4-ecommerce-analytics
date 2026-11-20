@@ -29,7 +29,7 @@ models:
           - not_logged
 - name: int_ga4__purchases
   description: One row per purchase event, with purchase_status = counted / duplicate / missing_transaction_id.
-    Single place where purchases are deduplicated.
+    Orders are identified by order_key (transaction_id + user_pseudo_id).
   columns:
   - name: purchase_status
     data_tests:
@@ -59,6 +59,6 @@ models:
   - dbt_utils.unique_combination_of_columns:
       arguments:
         combination_of_columns:
-        - transaction_id
+        - order_key
       config:
         where: purchase_status = 'counted'

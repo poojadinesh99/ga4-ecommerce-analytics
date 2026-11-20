@@ -16,10 +16,10 @@ with items as (
 
 counted_purchase_items as (
 
-    select items.*
+    select items.*, counted.order_key
     from items
     inner join (
-        select distinct purchase_event_key
+        select distinct purchase_event_key, order_key
         from {{ ref('int_ga4__purchases') }}
         where purchase_status = 'counted'
     ) as counted
@@ -46,7 +46,7 @@ sales as (
 
     select
         item_id,
-        count(distinct transaction_id) as orders,
+        count(distinct order_key)      as orders,
         sum(quantity)                  as units_sold,
         sum(item_revenue_usd)          as item_revenue_usd
     from counted_purchase_items

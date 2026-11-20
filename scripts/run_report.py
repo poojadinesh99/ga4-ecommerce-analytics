@@ -39,7 +39,7 @@ def main() -> None:
     for (k, status), n in sorted(counts.items()):
         print(f"| {k} | {status} | {n} |")
 
-    problems = [r for r in rows if r["status"] not in ("success", "pass")]
+    problems = [r for r in rows if r["status"] not in ("success", "pass", "no-op")]
     if problems:
         print("\n### Warnings and failures\n")
         print("| Node | Status | Failing rows | Message |\n|---|---|---|---|")

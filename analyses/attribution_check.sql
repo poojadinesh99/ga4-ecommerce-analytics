@@ -21,7 +21,7 @@ select
     countif(n_sources > 1)                  as sessions_multiple_sources,
     count(*)                                as sessions
 from (
-    select session_key, count(distinct concat(event_source, '/', event_medium)) as n_sources
+    select session_key, count(distinct if(event_source is null and event_medium is null, null, concat(coalesce(event_source, ''), '/', coalesce(event_medium, '')))) as n_sources
     from {{ ref('stg_ga4__events') }}
     where session_key is not null
     group by session_key

@@ -3,7 +3,7 @@
 End-to-end analytics engineering project that turns raw Google Analytics 4 event
 data into tested, analysis-ready data marts for e-commerce performance reporting.
 
-It is built on Google's public GA4 e-commerce sample dataset (~4 million events).
+It is built on Google's public GA4 e-commerce sample dataset (4.3 million events).
 The pipeline models user sessions, conversion funnels, acquisition channels,
 transactions and product performance.
 
@@ -21,9 +21,9 @@ transactions and product performance.
   counting of item sales.
 - **Analytics delivery:** Tableau-ready datasets for funnel, channel, device and product analysis.
 
-> **Verification status:** the project compiles and every compiled SQL file parses as
-> BigQuery SQL, but it has **not yet been run against BigQuery**. See
-> [Verification status](#verification-status) for exactly what has and has not been checked.
+> **Verified on BigQuery:** a full `dbt build` over all 92 days (4,295,584 events →
+> 360,129 sessions → 4,466 orders) passes **76 of 76 checks** (10 models, 66 data tests).
+> See [Verification status](#verification-status) and [docs/run_report.md](docs/run_report.md).
 
 **Data source:** Google Merchandise Store GA4 public sample,
 `bigquery-public-data.ga4_obfuscated_sample_ecommerce` (Nov 2020 to Jan 2021).
@@ -97,10 +97,10 @@ would merge many unrelated transactions into a single "order".
 ### Session attribution (an approximation)
 GA4 decides a session's attribution from the inputs on its `session_start` event
 (UTMs, gclid, referrer), using **non-direct last click** across sessions. This 2020–21
-export has no field holding that final result. The `session_traffic_source_last_click`
-record was added to the export later; query 5 in `attribution_check.sql` checks whether
-it exists. So this project reconstructs a per-session channel and labels it as an
-approximation:
+export has no field holding that final result: checked on the real export, its only
+traffic field is `traffic_source` (no `session_traffic_source_last_click` or
+`collected_traffic_source`). So this project reconstructs a per-session channel and
+labels it as an approximation:
 
 | | |
 |---|---|
@@ -108,17 +108,24 @@ approximation:
 | **Rule** | Use the values on the session's `session_start` event. If it has none, use the earliest event in the session that logged a source or medium. |
 | **`attribution_basis`** | Records which case applied: `session_start_params`, `other_event_params` or `not_logged` |
 | **Missing ≠ Direct** | Sessions with nothing logged get the channel `Unattributed (not logged)`. `Direct` is used only when the session explicitly logged source `(direct)`. |
-| **Obfuscated values** | `<Other>` and `(data deleted)` get the channel `Unattributed (obfuscated)` |
+| **Obfuscated values** | `Unattributed (obfuscated)` when the medium is `<Other>` / `(data deleted)`, or when there is no medium and the source is obfuscated. An obfuscated source with a known medium is still classified by the medium (`<Other> / organic` → Organic Search). |
+| **Search engines** | Matched as whole host names (`google`, `www.google.com`, `bing`, ...), never as substrings |
 | **Not used for channel** | `traffic_source.*` is the user's *first-touch* acquisition and never changes for that user. It is kept as `user_first_source` / `user_first_medium`. |
 | **Difference from GA4 reports** | No cross-session lookback. A session that GA4 would credit to an earlier non-direct channel appears here as Direct or Unattributed. |
 
-[`analyses/attribution_check.sql`](analyses/attribution_check.sql) measures, on the real data:
-- which events carry the params
-- the `not_logged` share for each channel
-- how often session attribution differs from first touch
-- whether the export has GA4's session attribution fields
-
-Until it has been run, treat channel results as provisional.
+**Measured on the real data** ([`analyses/attribution_check.sql`](analyses/attribution_check.sql)):
+- `session_start` events never carry source or medium in this export. Every attributed
+  session uses the earliest other event (`attribution_basis = other_event_params`).
+- 94,553 sessions (26%) logged no source or medium at all. These are real sessions with
+  page views, mostly first visits, so they keep their own channel instead of becoming Direct.
+- 66,366 sessions (18%) logged more than one source/medium, so choosing the earliest one
+  affects the result.
+- For 32% of attributed sessions, the session source differs from the user's first touch.
+  That is why `traffic_source` is not used for the session channel.
+- **Bug found and fixed by the first run:** the search-engine rule originally matched
+  "google" anywhere in a source name. It classified the store's own domain
+  (`shop.googlemerchandisestore.com`) and `analytics.google.com` as Organic Search,
+  which inflated that channel by about 57k sessions.
 
 ### New vs returning users
 - `user_type` is `new` when GA4's `ga_session_number` = 1, `returning` when it is > 1,
@@ -133,6 +140,8 @@ Until it has been run, treat channel results as provisional.
   - Consent or obfuscation gaps can leave the number missing.
 - `has_first_visit` (whether the session has a `first_visit` event) is kept for
   cross-checking. A warn-level test flags sessions with more than one session number.
+- On the real data, every session has a session number (0 `unknown`), and no session
+  has more than one.
 
 ### Funnel: observed vs inferred
 Steps: `session_start → view_item → add_to_cart → begin_checkout → purchase`.
@@ -153,13 +162,24 @@ the funnel is inferred.
 GA4 can send the same purchase more than once, and some purchase events have no usable
 `transaction_id`. GA4 has no event ID, so each purchase row gets a `purchase_event_key`:
 a hash of its user, timestamp, bundle sequence ID, `ecommerce` record and `items` array.
+
+**An order is (`transaction_id`, `user_pseudo_id`), not `transaction_id` alone.** The
+first real run showed:
+- All 314 transaction IDs repeated *by the same user* repeat the same revenue on the same
+  day. These are true duplicates.
+- All 15 transaction IDs shared *by different users* have different revenue on different
+  dates. These are different orders whose IDs collided in the obfuscated sample.
+
+Deduplicating on `transaction_id` alone would have dropped those 15 real orders.
+`fct_orders` is keyed on `order_key`, and a monitoring test reports the number of reused IDs.
+
 Deduplication happens in one place, `int_ga4__purchases`:
 
-| `purchase_status` | Meaning | Counts as an order / revenue? |
-|---|---|---|
-| `counted` | Earliest row for a `transaction_id` (ties broken by `purchase_event_key`) | Yes |
-| `duplicate` | Any other row with that `transaction_id`, including byte-identical copies | No |
-| `missing_transaction_id` | NULL, `''`, `(not set)` or `<Other>`; cannot be deduplicated | No |
+| `purchase_status` | Meaning | Counts as an order / revenue? | Real data |
+|---|---|---|---|
+| `counted` | Earliest row for an `order_key` (ties broken by `purchase_event_key`) | Yes | 4,466 rows, $308,830 (85.3%) |
+| `duplicate` | Any other row of that order, including byte-identical copies | No | 320 rows, $21,518 (5.9%) |
+| `missing_transaction_id` | NULL, `''`, `(not set)` or `<Other>`; cannot be deduplicated | No | 906 rows, $31,817 (8.8%) |
 
 - **Precision:** the export stores money as FLOAT64. Revenue is cast to `NUMERIC` and
   rounded to cents in staging, so sums are exact and reconciliation needs no tolerance.
@@ -168,16 +188,16 @@ Deduplication happens in one place, `int_ga4__purchases`:
   - Order and session revenue = `ecommerce.purchase_revenue_in_usd` of counted orders.
   - Item revenue = `items.item_revenue_in_usd` (price × quantity) of counted orders.
   - The two are different measures and are never added together or expected to be equal,
-    because order revenue can include tax and shipping. `analyses/revenue_bridge.sql`
-    measures the gap.
+    because order revenue can include tax and shipping. On the real data they total
+    $308,830 (orders) and $308,751 (items), and match exactly for 3,630 of 4,466 orders.
 - **Orders without a session:** a purchase with no `ga_session_id` is still an order in
   `fct_orders`, with `has_session = false` and NULL channel and device. Only such orders
-  are excluded from the session-revenue comparison.
+  are excluded from the session-revenue comparison. The real data has none.
 - **Exact reconciliation test:** session transactions and revenue must equal those of
-  orders that have a session, to the cent.
-- **Consistency monitor (warn):** reports any `transaction_id` whose duplicate rows
-  disagree on user or revenue. For those, "keep the earliest row" is a choice that changes
-  revenue.
+  orders that have a session, to the cent. Passes on the real data.
+- **Consistency monitor (warn):** reports any order whose duplicate rows disagree on
+  revenue. If they did, "keep the earliest row" would be a choice that changes revenue.
+  The real data has none.
 
 [`analyses/revenue_bridge.sql`](analyses/revenue_bridge.sql) breaks raw purchase revenue
 down by status and session presence, and compares order revenue with item revenue.
@@ -188,13 +208,15 @@ down by status and session presence, and compares order revenue with item revenu
 - Orders, units and revenue use only item lines from **counted** purchases. Each line
   (`purchase_event_key`, `item_index`) counts once, so duplicate purchase events and
   repeated rows cannot inflate item sales. A test checks the order counts against an
-  independent count of distinct (item, counted transaction) pairs.
+  independent count of distinct (item, counted order) pairs.
+- 448 of 16,003 purchased item lines have no `item_revenue_in_usd` in the export. They
+  count as units sold but add no item revenue.
 
 ## Data quality
 
 | Check | Where |
 |-------|-------|
-| `unique` + `not_null` on every grain key (session, transaction, item, channel) | marts, intermediate |
+| `unique` + `not_null` on every grain key (session, order, item, channel) | marts, intermediate |
 | `unique_combination_of_columns` on funnel table grains | `fct_funnel_daily`, `fct_funnel_steps` |
 | `accepted_values` on channel group, attribution basis, user type, device, funnel step, purchase status | marts, intermediate |
 | `accepted_range`: conversion rates in [0, 1]; revenue, durations, engagement ≥ 0 | marts, intermediate, staging |
@@ -202,34 +224,91 @@ down by status and session presence, and compares order revenue with item revenu
 | **Funnel consistency:** inferred counts never increase from one step to the next, for every date × channel × device | `tests/assert_funnel_is_monotonic.sql` |
 | **Completeness:** session totals are identical across the three funnel models | `tests/assert_sessions_preserved_in_funnel.sql` |
 | **Revenue reconciliation:** session transactions and revenue equal those of orders with a session, exactly | `tests/assert_session_revenue_equals_order_revenue.sql` |
-| **No item double counting:** item order counts equal distinct (item, counted transaction) pairs | `tests/assert_item_sales_use_counted_orders_only.sql` |
-| Monitors (warn): duplicate purchases that disagree on user or revenue; counted orders without revenue; sessions with more than one session number; unexpected device values | tests + YAML |
+| **No item double counting:** item order counts equal distinct (item, counted order) pairs | `tests/assert_item_sales_use_counted_orders_only.sql` |
+| Monitors (warn): duplicate rows of one order that disagree on revenue; transaction IDs reused across users (warns above 50); counted orders without revenue; sessions with more than one session number; unexpected device values | tests + YAML |
 
 ## Verification status
 
-| Check | How | Result |
-|-------|-----|--------|
-| dbt project parses (10 models, 64 tests, 3 analyses) | `dbt parse`, executed locally on dbt 1.12.7 | Passed, no warnings |
-| All Jinja and macros render to SQL | `dbt compile --no-introspect`, executed locally with no warehouse connection | Passed, 77 compiled files |
-| Compiled SQL is syntactically valid BigQuery | Every compiled file parsed with sqlglot's BigQuery dialect | Passed, 77/77. A parser cannot catch wrong column names or types. |
-| Models build on BigQuery | `dbt build` | **Not run**: needs a GCP project |
-| Data tests pass | `dbt build` | **Not run** |
-| Attribution and revenue assumptions hold on the real data | `analyses/*.sql` | **Not run** |
+All checks below were **executed** on 2026-11-20 against the BigQuery sandbox, dbt 1.12.7,
+for the full sample (2020-11-01 to 2021-01-31).
 
-Everything else in this README describes how the code is written (static code review),
-not observed results. After the first `dbt build`, `scripts/run_report.py` adds the
-real run evidence here: models and tests run, warnings with explanations, and row counts.
+| Check | Result |
+|-------|--------|
+| `dbt build`: 10 models + 66 data tests | **76 pass, 0 warn, 0 error** ([run report](docs/run_report.md)) |
+| One-week development build (2020-12-01 to 12-07) | 74 pass, 0 warn, 0 error |
+| All three `analyses/*.sql` run on BigQuery | All statements succeed |
+| Row counts | 4,295,584 events → 360,129 sessions (270,154 users) → 4,466 orders; 1,393 items |
+| Every event has a session key | Yes: 0 events without `user_pseudo_id` + `ga_session_id` |
+| Cost | 17.5 GB billed per full build (76 queries, measured in `INFORMATION_SCHEMA.JOBS`), so about 57 full builds fit in the sandbox's free 1 TB/month |
+
+The first real run exposed **two bugs that passed static review**, both now fixed and covered:
+1. The channel rule matched "google" as a substring, so the store's own domain counted as
+   Organic Search (see [Session attribution](#session-attribution-an-approximation)).
+2. Deduplicating orders on `transaction_id` alone would have merged 15 different orders
+   whose IDs collide across users (see [Revenue and orders](#revenue-and-orders)).
 
 ## Results
 
-> Not yet available. Requires the first `dbt build` (see above).
+| Metric | Value |
+|---|---|
+| Sessions / users | 360,129 / 270,154 |
+| Orders / revenue (counted) | 4,466 / $308,830 |
+| Session conversion (any purchase event) | 1.35% (4,848 sessions) |
+| Average order value | $69.15 |
+
+The sample's revenue is in whole dollars and obfuscated, so these numbers show what the
+pipeline produces, not the real store's performance.
 
 ## Findings
 
-> To be written from [`analyses/headline_insights.sql`](analyses/headline_insights.sql)
-> after the first full run (funnel drop-off, channel traffic vs revenue, device and
-> new vs returning users, low view-to-cart products). Only numbers from those queries
-> will be quoted here.
+All numbers come from [`analyses/headline_insights.sql`](analyses/headline_insights.sql)
+on the full build.
+
+**1. The biggest drop is at the top: only 21% of sessions view a product.**
+
+| Step | Sessions (inferred) | Sessions (observed) | From previous step |
+|---|---:|---:|---:|
+| Session start | 360,129 | 360,129 | |
+| View item | 77,317 | 77,020 | 21.5% |
+| Add to cart | 20,336 | 15,188 | 26.3% |
+| Begin checkout | 11,109 | 11,106 | 54.6% |
+| Purchase | 4,848 | 4,848 | 43.6% |
+
+5,148 sessions (25% of the inferred add-to-cart step) reached checkout or purchase without
+a logged `add_to_cart`. That is a tracking gap worth raising with whoever owns the GA4
+implementation, and it is why observed and inferred counts are kept apart.
+
+**2. Returning users convert about 4.5× better than new users, on every device.**
+Conversion is 0.63–0.71% for new users and 3.05–3.18% for returning users, across
+desktop, mobile and tablet. Device makes little difference at the same user type: desktop
+and mobile are within 0.15 percentage points. Returning users bring 27% of sessions but
+67% of revenue.
+
+**3. Channel results depend on attribution quality more than on channel performance.**
+
+| Channel | Share of sessions | Share of revenue | Conversion |
+|---|---:|---:|---:|
+| Organic Search | 28.6% | 31.9% | 1.61% |
+| Unattributed (not logged) | 26.3% | 0.0% | 0.00% |
+| Referral | 23.2% | 53.8% | 2.98% |
+| Direct | 10.5% | 6.6% | 0.81% |
+| Unattributed (obfuscated) | 8.8% | 6.1% | 1.00% |
+| Paid Search | 2.1% | 1.0% | 0.61% |
+
+- Referral looks like the best channel, but 56,491 of its 83,405 sessions and $99,005 of
+  its $166,279 revenue come from the store's own domains (`shop.googlemerchandisestore.com`,
+  `googlemerchandisestore.com`). Those look like self-referrals, for example checkout
+  hand-offs, which a production GA4 property would list as unwanted referrals. They are
+  shown, not hidden, because the right exclusion list is a business decision.
+- The 26% of sessions with no logged source almost never purchase (1 order). So the
+  missing attribution sits mostly on non-buying traffic, and excluding it would not
+  move revenue shares much.
+- Email converts at 11.9%, but on only 193 sessions, which is too small to act on.
+
+**4. Some products attract views but no carts.** Among products with at least 500 viewing
+sessions, the *Google Tracking Hat* had 1,458 viewing sessions and **0** add-to-carts,
+which points to an unavailable or broken product page rather than low interest. Campus
+stickers convert best, with about 42% of viewing sessions adding to cart.
 
 ## Dashboard
 

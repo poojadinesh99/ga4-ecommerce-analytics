@@ -189,11 +189,15 @@ models:
           min_value: 0
           max_value: 1
 - name: fct_orders
-  description: One row per transaction (deduplicated purchase events).
+  description: One row per order (order_key = transaction_id + user_pseudo_id). transaction_id is not
+    unique in the obfuscated sample.
   columns:
-  - name: transaction_id
+  - name: order_key
     data_tests:
     - unique
+    - not_null
+  - name: transaction_id
+    data_tests:
     - not_null
   - name: revenue_usd
     data_tests:
