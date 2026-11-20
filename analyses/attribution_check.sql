@@ -27,7 +27,18 @@ from (
     group by session_key
 );
 
--- 3. Session-scoped vs user first-touch attribution: how often do they differ?
+-- 3. Where did each session's attribution come from, and which channel did it get?
+--    A large not_logged share limits every channel comparison.
+select
+    attribution_basis,
+    channel_group,
+    count(*) as sessions,
+    round(safe_divide(count(*), sum(count(*)) over ()), 4) as share
+from {{ ref('fct_sessions') }}
+group by 1, 2
+order by sessions desc;
+
+-- 4. Session attribution vs user first touch (traffic_source): how often do they differ?
 select
     attribution_basis,
     session_source = user_first_source and session_medium = user_first_medium as matches_first_touch,
@@ -35,3 +46,11 @@ select
 from {{ ref('fct_sessions') }}
 group by 1, 2
 order by 1, 2;
+
+-- 5. Does this export have GA4's own session attribution fields?
+--    session_traffic_source_last_click / collected_traffic_source were added to the export
+--    later; if absent, event-param attribution is the only option for this sample.
+select column_name
+from `bigquery-public-data.ga4_obfuscated_sample_ecommerce.INFORMATION_SCHEMA.COLUMNS`
+where table_name = 'events_20210131'
+  and column_name in ('session_traffic_source_last_click', 'collected_traffic_source', 'traffic_source');

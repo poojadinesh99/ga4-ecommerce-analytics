@@ -1,6 +1,7 @@
 {#-
   One row per GA4 event, with the event_params we need flattened into columns.
-  A session key is user_pseudo_id + ga_session_id (ga_session_id alone is not unique).
+  Identifiers are cleaned of placeholder values (see macros/ga4_identity.sql) and
+  money is cast to NUMERIC cents.
 -#}
 with source as (
 
@@ -16,8 +17,9 @@ flattened as (
         parse_date('%Y%m%d', event_date)              as event_date,
         timestamp_micros(event_timestamp)             as event_ts,
         event_name,
-        user_pseudo_id,
+        {{ ga4_clean_id('user_pseudo_id') }}          as user_pseudo_id,
         timestamp_micros(user_first_touch_timestamp)  as user_first_touch_ts,
+        {{ ga4_purchase_event_key() }}                as purchase_event_key,
 
         {{ ga4_param_int('ga_session_id') }}          as ga_session_id,
         {{ ga4_param_int('ga_session_number') }}      as ga_session_number,
@@ -28,12 +30,13 @@ flattened as (
         {{ ga4_param_str('page_title') }}             as page_title,
         {{ ga4_param_str('page_referrer') }}          as page_referrer,
 
-        -- session-scoped acquisition (logged on the session's first events)
-        {{ ga4_param_str('source') }}                 as event_source,
-        {{ ga4_param_str('medium') }}                 as event_medium,
-        {{ ga4_param_str('campaign') }}               as event_campaign,
+        -- Traffic source as logged on this event. GA4 puts the session's attribution
+        -- inputs on session_start; these are inputs, not GA4's final session attribution.
+        {{ ga4_blank_to_null(ga4_param_str('source')) }}   as event_source,
+        {{ ga4_blank_to_null(ga4_param_str('medium')) }}   as event_medium,
+        {{ ga4_blank_to_null(ga4_param_str('campaign')) }} as event_campaign,
 
-        -- user-scoped first-touch acquisition
+        -- User-scoped first-touch acquisition (never changes for the user)
         traffic_source.source                         as user_first_source,
         traffic_source.medium                         as user_first_medium,
         traffic_source.name                           as user_first_campaign,
@@ -43,8 +46,8 @@ flattened as (
         geo.country                                   as country,
         geo.continent                                 as continent,
 
-        nullif(ecommerce.transaction_id, '(not set)') as transaction_id,
-        ecommerce.purchase_revenue_in_usd             as purchase_revenue_usd,
+        {{ ga4_clean_id('ecommerce.transaction_id') }} as transaction_id,
+        {{ to_usd('ecommerce.purchase_revenue_in_usd') }} as purchase_revenue_usd,
         ecommerce.total_item_quantity                 as total_item_quantity
 
     from source
@@ -52,9 +55,6 @@ flattened as (
 )
 
 select
-    case
-        when ga_session_id is not null
-        then to_hex(md5(concat(user_pseudo_id, '-', cast(ga_session_id as string))))
-    end as session_key,
+    {{ ga4_session_key('user_pseudo_id', 'ga_session_id') }} as session_key,
     *
 from flattened

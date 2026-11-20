@@ -12,14 +12,21 @@ with events as (
 
 session_source as (
 
+    -- GA4 records a session's attribution inputs on its session_start event, so prefer
+    -- that event; otherwise fall back to the earliest event that logged a source or medium.
     select
         session_key,
         event_source   as session_source,
         event_medium   as session_medium,
-        event_campaign as session_campaign
+        event_campaign as session_campaign,
+        if(event_name = 'session_start', 'session_start_params', 'other_event_params')
+                       as attribution_basis
     from events
     where event_source is not null or event_medium is not null
-    qualify row_number() over (partition by session_key order by event_ts) = 1
+    qualify row_number() over (
+        partition by session_key
+        order by if(event_name = 'session_start', 0, 1), event_ts
+    ) = 1
 
 ),
 
@@ -40,7 +47,9 @@ aggregated as (
         session_key,
         any_value(user_pseudo_id)                          as user_pseudo_id,
         any_value(ga_session_id)                           as ga_session_id,
-        max(ga_session_number)                             as session_number,
+        min(ga_session_number)                             as session_number,
+        count(distinct ga_session_number)                  as distinct_session_numbers,
+        countif(event_name = 'first_visit') > 0            as has_first_visit,
         min(event_date)                                    as session_date,
         min(event_ts)                                      as session_start_ts,
         max(event_ts)                                      as session_end_ts,
@@ -88,10 +97,7 @@ select
     session_source.session_source,
     session_source.session_medium,
     session_source.session_campaign,
-    case
-        when session_source.session_key is not null then 'session_event_params'
-        else 'no_source_logged'
-    end as attribution_basis,
+    coalesce(session_source.attribution_basis, 'not_logged') as attribution_basis,
     landing_page.landing_page,
     coalesce(session_orders.transactions, 0)         as transactions,
     coalesce(session_orders.purchase_revenue_usd, 0) as purchase_revenue_usd

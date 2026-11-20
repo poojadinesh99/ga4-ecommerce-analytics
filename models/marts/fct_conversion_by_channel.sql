@@ -9,7 +9,7 @@ with by_channel as (
         channel_group,
         count(*)                                as sessions,
         count(distinct user_pseudo_id)          as users,
-        countif(is_new_user)                    as new_user_sessions,
+        countif(user_type = 'new')              as new_user_sessions,
         countif(is_engaged)                     as engaged_sessions,
         -- inferred progression (monotonic), used for the step-to-step rates below
         countif(reached_view_item)              as view_item_sessions,

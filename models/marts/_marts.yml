@@ -11,6 +11,17 @@ models:
   - name: user_pseudo_id
     data_tests:
     - not_null
+  - name: user_type
+    description: new (ga_session_number = 1), returning (> 1) or unknown (no ga_session_number). Per user_pseudo_id,
+      i.e. per browser/device cookie, not per person.
+    data_tests:
+    - not_null
+    - accepted_values:
+        arguments:
+          values:
+          - new
+          - returning
+          - unknown
   - name: session_date
     data_tests:
     - not_null
@@ -20,6 +31,7 @@ models:
     - accepted_values:
         arguments:
           values:
+          - Unattributed (not logged)
           - Direct
           - Paid Search
           - Paid Other
@@ -31,16 +43,19 @@ models:
           - Referral
           - Unattributed (obfuscated)
           - Unassigned
+    description: Simplified GA4 default channel group of the session's logged source/medium. Not GA4's
+      official last non-direct click attribution.
   - name: attribution_basis
-    description: session_event_params when a source/medium was logged in the session, otherwise no_source_logged
-      (treated as direct).
+    description: 'Where the session''s source/medium came from: session_start_params, other_event_params,
+      or not_logged.'
     data_tests:
     - not_null
     - accepted_values:
         arguments:
           values:
-          - session_event_params
-          - no_source_logged
+          - session_start_params
+          - other_event_params
+          - not_logged
   - name: device_category
     data_tests:
     - accepted_values:
@@ -73,6 +88,7 @@ models:
     - dbt_utils.accepted_range:
         arguments:
           min_value: 0
+    description: Sum of counted orders' revenue (NUMERIC, USD cents).
   - name: session_duration_seconds
     data_tests:
     - dbt_utils.accepted_range:
@@ -184,12 +200,17 @@ models:
     - dbt_utils.accepted_range:
         arguments:
           min_value: 0
+        config:
+          where: revenue_usd is not null
   - name: session_key
     data_tests:
     - relationships:
         arguments:
           to: ref('fct_sessions')
           field: session_key
+  - name: has_session
+    data_tests:
+    - not_null
 - name: fct_item_performance
   description: Product-level funnel and revenue.
   columns:
@@ -198,6 +219,11 @@ models:
     - unique
     - not_null
   - name: units_sold
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+  - name: item_revenue_usd
     data_tests:
     - dbt_utils.accepted_range:
         arguments:

@@ -32,18 +32,26 @@ with_depth as (
 select
     session_key,
     user_pseudo_id,
+    -- New vs returning, from GA4's ga_session_number for this user_pseudo_id
+    -- (a browser/device cookie, not a person). 'unknown' when GA4 sent no number.
     session_number,
-    session_number = 1                                   as is_new_user,
+    case
+        when session_number = 1 then 'new'
+        when session_number > 1 then 'returning'
+        else 'unknown'
+    end                                                  as user_type,
+    case when session_number is not null then session_number = 1 end as is_new_user,
+    has_first_visit,
     session_date,
     session_start_ts,
     session_end_ts,
     timestamp_diff(session_end_ts, session_start_ts, second) as session_duration_seconds,
 
-    -- Attribution: first non-null source/medium event param in the session.
-    -- Sessions with none logged are treated as direct (attribution_basis says which).
+    -- Attribution from event params logged in the session (see int_ga4__sessions).
+    -- NULL source/medium means nothing was logged; it is not assumed to be Direct.
     attribution_basis,
-    coalesce(session_source, '(direct)')                 as session_source,
-    coalesce(session_medium, '(none)')                   as session_medium,
+    session_source,
+    session_medium,
     session_campaign,
     {{ channel_group('session_source', 'session_medium', 'session_campaign') }} as channel_group,
     user_first_source,

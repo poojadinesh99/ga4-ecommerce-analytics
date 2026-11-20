@@ -23,10 +23,10 @@ select
 from {{ ref('fct_conversion_by_channel') }}
 order by sessions desc;
 
--- 3. Device and new vs returning
+-- 3. Device and new vs returning (user_type is per browser/device cookie)
 select
     device_category,
-    is_new_user,
+    user_type,
     count(*)                                                  as sessions,
     round(safe_divide(countif(reached_add_to_cart), count(*)), 4) as add_to_cart_rate,
     round(safe_divide(countif(reached_purchase), count(*)), 4)    as conversion_rate,

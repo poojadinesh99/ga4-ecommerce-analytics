@@ -10,6 +10,23 @@ models:
   - name: session_start_ts
     data_tests:
     - not_null
+  - name: distinct_session_numbers
+    description: Distinct ga_session_number values seen in the session; should be 1.
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          max_value: 1
+        config:
+          severity: warn
+  - name: attribution_basis
+    data_tests:
+    - not_null
+    - accepted_values:
+        arguments:
+          values:
+          - session_start_params
+          - other_event_params
+          - not_logged
 - name: int_ga4__purchases
   description: One row per purchase event, with purchase_status = counted / duplicate / missing_transaction_id.
     Single place where purchases are deduplicated.
@@ -23,12 +40,21 @@ models:
           - counted
           - duplicate
           - missing_transaction_id
-  - name: revenue_usd
+  - name: purchase_event_key
     data_tests:
     - not_null
+  - name: revenue_usd
+    description: purchase_revenue_in_usd as NUMERIC cents; NULL when GA4 sent none.
+    data_tests:
+    - not_null:
+        config:
+          severity: warn
+          where: purchase_status = 'counted'
     - dbt_utils.accepted_range:
         arguments:
           min_value: 0
+        config:
+          where: revenue_usd is not null
   data_tests:
   - dbt_utils.unique_combination_of_columns:
       arguments:
