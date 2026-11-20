@@ -5,12 +5,12 @@ exposures:
     label: GA4 Funnel & Conversion Dashboard
     type: dashboard
     maturity: medium
-    url: https://public.tableau.com/  # replace with your Tableau Public link
+    url: https://public.tableau.com/views/GA4E-commerceFunnelAnalytics/GA4E-commerceFunnelConversionGoogleMerchandiseStoresampleNov2020Jan2021
     description: Tableau Public dashboard of the e-commerce funnel and channel conversion.
     depends_on:
       - ref('fct_funnel_steps')
       - ref('fct_conversion_by_channel')
-      - ref('fct_orders')
+      - ref('fct_funnel_daily')
       - ref('fct_item_performance')
     owner:
       name: Pooja Dinesh

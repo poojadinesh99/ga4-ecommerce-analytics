@@ -312,8 +312,19 @@ stickers convert best, with about 42% of viewing sessions adding to cart.
 
 ## Dashboard
 
-> Tableau Public link and screenshot go here once published.
-> Build guide: [docs/tableau_dashboard.md](docs/tableau_dashboard.md).
+**[Open the interactive dashboard on Tableau Public](https://public.tableau.com/views/GA4E-commerceFunnelAnalytics/GA4E-commerceFunnelConversionGoogleMerchandiseStoresampleNov2020Jan2021)**
+
+[![GA4 e-commerce funnel and conversion dashboard](docs/dashboard.png)](https://public.tableau.com/views/GA4E-commerceFunnelAnalytics/GA4E-commerceFunnelConversionGoogleMerchandiseStoresampleNov2020Jan2021)
+
+| Panel | Source | Shows |
+|---|---|---|
+| Funnel | `fct_funnel_steps` | Sessions reaching each step (inferred progression) |
+| Conversion by channel | `fct_conversion_by_channel` | Session conversion rate per channel |
+| Conversion by device | `fct_funnel_daily` | Purchase sessions ÷ sessions, computed from summed counts, not averaged rates |
+| Products | `fct_item_performance` | Add-to-cart ÷ view sessions for products with at least 500 viewing sessions, lowest first |
+
+The dashboard reads CSV extracts of the marts (`scripts/export_marts.py`), because Tableau
+Public cannot connect to BigQuery. Build notes: [docs/tableau_dashboard.md](docs/tableau_dashboard.md).
 
 ## Run it
 
