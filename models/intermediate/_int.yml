@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: int_ga4__sessions
+    description: Events rolled up to one row per session, with session source and landing page.
+    columns:
+      - name: session_key
+        data_tests: [unique, not_null]
+      - name: session_start_ts
+        data_tests: [not_null]

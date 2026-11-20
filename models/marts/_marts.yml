@@ -1,0 +1,190 @@
+version: 2
+models:
+- name: fct_sessions
+  description: 'One row per session with channel, device, engagement and funnel flags. `reached_*` flags
+    mean "reached this step or a deeper one".
+
+    '
+  columns:
+  - name: session_key
+    data_tests:
+    - unique
+    - not_null
+  - name: user_pseudo_id
+    data_tests:
+    - not_null
+  - name: session_date
+    data_tests:
+    - not_null
+  - name: channel_group
+    data_tests:
+    - not_null
+    - accepted_values:
+        arguments:
+          values:
+          - Direct
+          - Paid Search
+          - Paid Other
+          - Display
+          - Organic Search
+          - Organic Social
+          - Email
+          - Affiliates
+          - Referral
+          - Unattributed (obfuscated)
+          - Unassigned
+  - name: device_category
+    data_tests:
+    - accepted_values:
+        arguments:
+          values:
+          - desktop
+          - mobile
+          - tablet
+          - (not set)
+        config:
+          severity: warn
+  - name: funnel_depth
+    data_tests:
+    - accepted_values:
+        arguments:
+          values:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          quote: false
+  - name: engagement_seconds
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+  - name: purchase_revenue_usd
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+  - name: session_duration_seconds
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+- name: fct_funnel_daily
+  description: Daily funnel counts by channel and device (wide, one column per step).
+  data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+        - session_date
+        - channel_group
+        - device_category
+  columns:
+  - name: sessions
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 1
+- name: fct_funnel_steps
+  description: Long-format funnel (date x channel x device x step) for Tableau.
+  data_tests:
+  - dbt_utils.unique_combination_of_columns:
+      arguments:
+        combination_of_columns:
+        - session_date
+        - channel_group
+        - device_category
+        - step_order
+  columns:
+  - name: step_order
+    data_tests:
+    - accepted_values:
+        arguments:
+          values:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          quote: false
+  - name: sessions
+    data_tests:
+    - not_null
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+- name: fct_conversion_by_channel
+  description: One row per channel with step-to-step conversion rates, AOV and revenue share.
+  columns:
+  - name: channel_group
+    data_tests:
+    - unique
+    - not_null
+  - name: engagement_rate
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+          max_value: 1
+  - name: view_item_to_cart_rate
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+          max_value: 1
+        config:
+          where: view_item_to_cart_rate is not null
+  - name: cart_to_checkout_rate
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+          max_value: 1
+        config:
+          where: cart_to_checkout_rate is not null
+  - name: checkout_to_purchase_rate
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+          max_value: 1
+        config:
+          where: checkout_to_purchase_rate is not null
+  - name: session_conversion_rate
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+          max_value: 1
+- name: fct_orders
+  description: One row per transaction (deduplicated purchase events).
+  columns:
+  - name: transaction_id
+    data_tests:
+    - unique
+    - not_null
+  - name: revenue_usd
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+  - name: session_key
+    data_tests:
+    - relationships:
+        arguments:
+          to: ref('fct_sessions')
+          field: session_key
+        config:
+          severity: warn
+- name: fct_item_performance
+  description: Product-level funnel and revenue.
+  columns:
+  - name: item_id
+    data_tests:
+    - unique
+    - not_null
+  - name: units_sold
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0

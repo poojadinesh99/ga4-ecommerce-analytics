@@ -1,0 +1,31 @@
+name: ga4_ecommerce
+version: "1.0.0"
+config-version: 2
+profile: ga4_ecommerce
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # The public sample covers 2020-11-01 .. 2021-01-31 (sharded events_YYYYMMDD tables).
+  # Narrow this window while developing to scan less data.
+  ga4_start_date: "20201101"
+  ga4_end_date: "20210131"
+
+models:
+  ga4_ecommerce:
+    # The BigQuery sandbox does not allow DML (MERGE/INSERT), so everything is
+    # a view or a full-refresh table built with CREATE OR REPLACE.
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: table
+      +schema: intermediate
+    marts:
+      +materialized: table
+      +schema: marts

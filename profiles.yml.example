@@ -1,0 +1,13 @@
+# Copy to ~/.dbt/profiles.yml (or ./profiles.yml) and set your sandbox project id.
+ga4_ecommerce:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth            # uses `gcloud auth application-default login`
+      project: YOUR_GCP_PROJECT_ID
+      dataset: ga4_dbt         # models land in ga4_dbt_staging / _intermediate / _marts
+      location: US             # must match the public dataset's location
+      threads: 4
+      job_execution_timeout_seconds: 300
+      maximum_bytes_billed: 20000000000   # 20 GB guardrail per query

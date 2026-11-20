@@ -1,0 +1,38 @@
+version: 2
+models:
+- name: stg_ga4__events
+  description: One row per GA4 event with key event_params flattened into columns.
+  columns:
+  - name: session_key
+    description: Hash of user_pseudo_id + ga_session_id. Null when the event has no ga_session_id.
+  - name: event_ts
+    data_tests:
+    - not_null
+  - name: event_name
+    data_tests:
+    - not_null
+  - name: user_pseudo_id
+    data_tests:
+    - not_null
+  - name: purchase_revenue_usd
+    data_tests:
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+        config:
+          where: purchase_revenue_usd is not null
+- name: stg_ga4__event_items
+  description: One row per item on view_item / add_to_cart / begin_checkout / purchase events.
+  columns:
+  - name: item_id
+    data_tests:
+    - not_null
+  - name: event_name
+    data_tests:
+    - accepted_values:
+        arguments:
+          values:
+          - view_item
+          - add_to_cart
+          - begin_checkout
+          - purchase
