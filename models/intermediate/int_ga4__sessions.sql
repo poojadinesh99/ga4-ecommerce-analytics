@@ -62,12 +62,23 @@ aggregated as (
         countif(event_name = 'begin_checkout')    > 0      as has_begin_checkout,
         countif(event_name = 'add_shipping_info') > 0      as has_add_shipping_info,
         countif(event_name = 'add_payment_info')  > 0      as has_add_payment_info,
-        countif(event_name = 'purchase')          > 0      as has_purchase,
-
-        count(distinct if(event_name = 'purchase', transaction_id, null))     as transactions,
-        coalesce(sum(if(event_name = 'purchase', purchase_revenue_usd, 0)), 0) as purchase_revenue_usd
+        countif(event_name = 'purchase')          > 0      as has_purchase
 
     from events
+    group by session_key
+
+),
+
+-- Revenue comes from deduplicated orders, never from raw purchase events.
+session_orders as (
+
+    select
+        session_key,
+        count(*)         as transactions,
+        sum(revenue_usd) as purchase_revenue_usd
+    from {{ ref('int_ga4__purchases') }}
+    where purchase_status = 'counted'
+      and session_key is not null
     group by session_key
 
 )
@@ -77,7 +88,14 @@ select
     session_source.session_source,
     session_source.session_medium,
     session_source.session_campaign,
-    landing_page.landing_page
+    case
+        when session_source.session_key is not null then 'session_event_params'
+        else 'no_source_logged'
+    end as attribution_basis,
+    landing_page.landing_page,
+    coalesce(session_orders.transactions, 0)         as transactions,
+    coalesce(session_orders.purchase_revenue_usd, 0) as purchase_revenue_usd
 from aggregated
 left join session_source using (session_key)
 left join landing_page using (session_key)
+left join session_orders using (session_key)

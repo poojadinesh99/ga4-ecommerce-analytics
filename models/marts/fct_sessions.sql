@@ -1,7 +1,12 @@
 {#-
-  Session fact table. Funnel flags are "reached this step or a deeper one",
-  so the funnel is monotonic by construction (a session that purchased also
-  counts as having reached checkout, even if begin_checkout was not logged).
+  Session fact table. Two kinds of funnel flags:
+    has_<event>      observed: GA4 logged this event in the session
+    reached_<step>   inferred: the session got to this step or a deeper one, so a
+                     purchase implies checkout even when begin_checkout was not logged.
+                     Monotonic by construction; use for the funnel shape only.
+  transactions / purchase_revenue_usd come from deduplicated orders (int_ga4__purchases),
+  so a session can have has_purchase = true and transactions = 0 (duplicate or missing
+  transaction_id).
 -#}
 with sessions as (
 
@@ -34,6 +39,9 @@ select
     session_end_ts,
     timestamp_diff(session_end_ts, session_start_ts, second) as session_duration_seconds,
 
+    -- Attribution: first non-null source/medium event param in the session.
+    -- Sessions with none logged are treated as direct (attribution_basis says which).
+    attribution_basis,
     coalesce(session_source, '(direct)')                 as session_source,
     coalesce(session_medium, '(none)')                   as session_medium,
     session_campaign,

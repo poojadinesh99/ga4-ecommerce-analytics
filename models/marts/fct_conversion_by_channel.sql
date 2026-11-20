@@ -1,4 +1,8 @@
-{#- Channel scorecard: volume, engagement, step-to-step conversion and revenue. -#}
+{#-
+  Channel scorecard: volume, engagement, step-to-step conversion and revenue.
+  Step rates use the inferred (cumulative) funnel so they stay within [0, 1].
+  purchase_sessions is identical under both definitions (purchase is the last step).
+-#}
 with by_channel as (
 
     select
@@ -7,10 +11,15 @@ with by_channel as (
         count(distinct user_pseudo_id)          as users,
         countif(is_new_user)                    as new_user_sessions,
         countif(is_engaged)                     as engaged_sessions,
+        -- inferred progression (monotonic), used for the step-to-step rates below
         countif(reached_view_item)              as view_item_sessions,
         countif(reached_add_to_cart)            as add_to_cart_sessions,
         countif(reached_begin_checkout)         as begin_checkout_sessions,
         countif(reached_purchase)               as purchase_sessions,
+        -- observed events, for comparison
+        countif(has_view_item)                  as view_item_sessions_observed,
+        countif(has_add_to_cart)                as add_to_cart_sessions_observed,
+        countif(has_begin_checkout)             as begin_checkout_sessions_observed,
         sum(transactions)                       as transactions,
         sum(purchase_revenue_usd)               as purchase_revenue_usd
     from {{ ref('fct_sessions') }}

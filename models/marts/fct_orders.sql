@@ -1,14 +1,4 @@
-{#- One row per transaction. GA4 can log the same purchase more than once, so keep the first. -#}
-with purchases as (
-
-    select *
-    from {{ ref('stg_ga4__events') }}
-    where event_name = 'purchase'
-      and transaction_id is not null
-    qualify row_number() over (partition by transaction_id order by event_ts) = 1
-
-)
-
+{#- One row per transaction: the counted purchase event for each transaction_id. -#}
 select
     purchases.transaction_id,
     purchases.event_ts               as ordered_at,
@@ -20,7 +10,8 @@ select
     sessions.country,
     sessions.is_new_user,
     purchases.total_item_quantity,
-    coalesce(purchases.purchase_revenue_usd, 0) as revenue_usd
-from purchases
+    purchases.revenue_usd
+from {{ ref('int_ga4__purchases') }} as purchases
 left join {{ ref('fct_sessions') }} as sessions
     on purchases.session_key = sessions.session_key
+where purchases.purchase_status = 'counted'

@@ -1,10 +1,8 @@
 version: 2
 models:
 - name: fct_sessions
-  description: 'One row per session with channel, device, engagement and funnel flags. `reached_*` flags
-    mean "reached this step or a deeper one".
-
-    '
+  description: One row per session with channel, device, engagement and funnel flags. has_* = observed
+    GA4 events; reached_* = inferred cumulative progression (this step or deeper).
   columns:
   - name: session_key
     data_tests:
@@ -33,6 +31,16 @@ models:
           - Referral
           - Unattributed (obfuscated)
           - Unassigned
+  - name: attribution_basis
+    description: session_event_params when a source/medium was logged in the session, otherwise no_source_logged
+      (treated as direct).
+    data_tests:
+    - not_null
+    - accepted_values:
+        arguments:
+          values:
+          - session_event_params
+          - no_source_logged
   - name: device_category
     data_tests:
     - accepted_values:
@@ -107,7 +115,15 @@ models:
           - 4
           - 5
           quote: false
-  - name: sessions
+  - name: sessions_inferred
+    description: Sessions that reached this step or a deeper one.
+    data_tests:
+    - not_null
+    - dbt_utils.accepted_range:
+        arguments:
+          min_value: 0
+  - name: sessions_observed
+    description: Sessions where GA4 logged this step's event.
     data_tests:
     - not_null
     - dbt_utils.accepted_range:
@@ -174,8 +190,6 @@ models:
         arguments:
           to: ref('fct_sessions')
           field: session_key
-        config:
-          severity: warn
 - name: fct_item_performance
   description: Product-level funnel and revenue.
   columns:
